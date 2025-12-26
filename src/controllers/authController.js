@@ -369,6 +369,25 @@ const verifyEmail = async (req, res) => {
     }
 };
 
+const deleteAccount = async (req, res) => {
+    try {
+        const user = req.user;
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        await Candidate.destroy({ where: { user_id: user.id } });
+        await Employer.destroy({ where: { user_id: user.id } });
+        await CandidateProfile.destroy({ where: { candidate_id: user.candidate.id } });
+        await CandidateEducation.destroy({ where: { candidate_id: user.candidate.id } });
+        await CandidateExperience.destroy({ where: { candidate_id: user.candidate.id } });
+        await User.destroy({ where: { id: user.id } });
+        res.json({ message: 'Account deleted successfully' });
+    } catch (error) {
+        console.error('Delete account error:', error);
+        res.status(500).json({ error: 'Failed to delete account' });
+    }
+};
+
 module.exports = {
     register,
     login,
@@ -376,6 +395,7 @@ module.exports = {
     assignRole,
     updatePassword,
     requestVerification,
-    verifyEmail
+    verifyEmail,
+    deleteAccount
 };
 

@@ -10,6 +10,7 @@ router.patch('/assign-role', authenticate, authController.assignRole);
 router.patch('/update-password', authenticate, authController.updatePassword);
 router.post('/request-verification', authenticate, authController.requestVerification);
 router.post('/verify-email', authController.verifyEmail);
+router.delete('/delete-account', authenticate, authController.deleteAccount);
 
 module.exports = router;
 

@@ -22,6 +22,12 @@ router.put(
 // router.post('/video', fileUploadService.upload.single('video'), candidateController.uploadVideo);
 router.get('/matches', candidateController.getCandidateMatches);
 router.post('/reject-job', candidateController.rejectJobApplication);
+router.post('/create-education', candidateController.createCandidateEducation);
+router.put('/update-education/:id', candidateController.updateCandidateEducation);
+router.delete('/delete-education/:id', candidateController.deleteCandidateExperience);
+router.post('/create-experience', candidateController.createCandidateExperience);
+router.put('/update-experience/:id', candidateController.updateCandidateExperience);
+router.delete('/delete-experience/:id', candidateController.deleteCandidateExperience);
 
 module.exports = router;
 

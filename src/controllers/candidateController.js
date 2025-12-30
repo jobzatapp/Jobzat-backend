@@ -6,6 +6,8 @@ const fileUploadService = require('../services/fileUploadService');
 const localFileUploadService = require('../services/localFileUploadService');
 const matchingService = require('../services/matchingService');
 const pdf = require('pdf-parse');
+const CandidateEducation = require('../models/CandidateEducation');
+const CandidateExperience = require('../models/CandidateExperience');
 
 /**
  * Get candidate profile
@@ -17,7 +19,7 @@ const getProfile = async (req, res) => {
                 {
                     model: Candidate,
                     as: 'candidate',
-                    include: [{ model: CandidateProfile, as: 'profile' }]
+                    include: [{ model: CandidateProfile, as: 'profile' }, { model: CandidateEducation, as: 'educations' }, { model: CandidateExperience, as: 'experiences' }]
                 }
             ]
         });
@@ -407,12 +409,175 @@ const rejectJobApplication = async (req, res) => {
     }
 }
 
+
+const createCandidateEducation = async (req, res)=> {
+    try {
+        const { school_name, degree, start_date, end_date, location } = req.body;
+        const user = await User.findByPk(req.user.id, {
+            include: [{ model: Candidate, as: 'candidate' }]
+        });
+        if (!user.candidate) {
+            return res.status(404).json({ error: 'Candidate profile not found' });
+        }
+        const education = new CandidateEducation({
+            school_name: school_name,
+            degree: degree,
+            start_date: start_date,
+            end_date: end_date,
+            location: location,
+            candidate_id: user.candidate.id,
+            created_at: new Date(),
+            updated_at: new Date()
+        });
+        await education.save();
+        return res.json({ message: 'Candidate education created successfully', education });
+    } catch (error) {
+        console.error('Create candidate education error:', error);
+        res.status(500).json({ error: 'Failed to create candidate education' });
+    }
+}
+
+const updateCandidateEducation = async (req, res)=> {
+    try {
+        const { id } = req.params;
+        const { school_name, degree, start_date, end_date, location } = req.body;
+        const user = await User.findByPk(req.user.id, {
+            include: [{ model: Candidate, as: 'candidate' }]
+        });
+        if (!user.candidate) {
+            return res.status(404).json({ error: 'Candidate profile not found' });
+        }
+        const education = await CandidateEducation.findByPk(id);
+        if (!education) {
+            return res.status(404).json({ error: 'Candidate education not found' });
+        }
+        await education.update({
+            school_name: school_name,
+            degree: degree,
+            start_date: start_date,
+            end_date: end_date,
+            location: location,
+            updated_at: new Date()
+        });
+        return res.json({ message: 'Candidate education updated successfully', education });
+    } catch (error) {
+        console.error('Update candidate education error:', error);
+        res.status(500).json({ error: 'Failed to update candidate education' });
+    }
+};
+
+const deleteCandidateEducation = async (req, res)=> {
+    try {
+        const { id } = req.params;
+        const user = await User.findByPk(req.user.id, {
+            include: [{ model: Candidate, as: 'candidate', include: [{ model: CandidateEducation, as: 'educations' }] }]
+        });
+        if (!user.candidate || user.candidate.educations.length === 0) {
+            return res.status(404).json({ error: 'Candidate profile not found' });
+        }
+        const education = await CandidateEducation.findByPk(id);
+        if (!education) {
+            return res.status(404).json({ error: 'Candidate education not found' });
+        }
+        await education.destroy();
+        return res.json({ message: 'Candidate education deleted successfully' });
+    } catch (error) {
+        console.error('Delete candidate education error:', error);
+        res.status(500).json({ error: 'Failed to delete candidate education' });
+    }
+}
+
+const createCandidateExperience = async (req, res)=> {
+    try {
+        const { title, company_name, department, start_date, end_date, location } = req.body;
+        const user = await User.findByPk(req.user.id, {
+            include: [{ model: Candidate, as: 'candidate' }]
+        });
+        if (!user.candidate) {
+            return res.status(404).json({ error: 'Candidate profile not found' });
+        }
+        const experience = new CandidateExperience({
+            title: title,
+            company_name: company_name,
+            department: department,
+            start_date: start_date,
+            end_date: end_date,
+            location: location,
+            candidate_id: user.candidate.id,
+            created_at: new Date(),
+            updated_at: new Date()
+        });
+        await experience.save();
+        return res.json({ message: 'Candidate experience created successfully', experience });
+    } catch (error) {
+        console.error('Create candidate experience error:', error);
+        res.status(500).json({ error: 'Failed to create candidate experience' });
+    }
+}
+
+const updateCandidateExperience = async (req, res)=> {
+    try {
+        const { id } = req.params;
+        const { title, company_name, department, start_date, end_date, location } = req.body;
+        const user = await User.findByPk(req.user.id, {
+            include: [{ model: Candidate, as: 'candidate' }]
+        });
+        if (!user.candidate) {
+            return res.status(404).json({ error: 'Candidate profile not found' });
+        }
+        const experience = await CandidateExperience.findByPk(id);
+        if (!experience) {
+            return res.status(404).json({ error: 'Candidate experience not found' });
+        }
+        await experience.update({
+            title: title,
+            company_name: company_name,
+            department: department, 
+            start_date: start_date,
+            end_date: end_date,
+            location: location,
+            updated_at: new Date()
+        });
+        return res.json({ message: 'Candidate experience updated successfully', experience });
+    } catch (error) {
+        console.error('Update candidate experience error:', error);
+        res.status(500).json({ error: 'Failed to update candidate experience' });
+    }
+}
+
+const deleteCandidateExperience = async (req, res)=> {
+    try {
+        const { id } = req.params;
+        const user = await User.findByPk(req.user.id, {
+            include: [{ model: Candidate, as: 'candidate' }]
+        });
+        if (!user.candidate) {
+            return res.status(404).json({ error: 'Candidate profile not found' });
+        }
+        const experience = await CandidateExperience.findByPk(id);
+        if (!experience) {
+            return res.status(404).json({ error: 'Candidate experience not found' });
+        }
+        await experience.destroy();
+        return res.json({ message: 'Candidate experience deleted successfully' });
+    } catch (error) {
+        console.error('Delete candidate experience error:', error);
+        res.status(500).json({ error: 'Failed to delete candidate experience' });
+    }
+}
+
 module.exports = {
     getProfile,
     updateProfile,
     uploadCV,
     uploadVideo,
     getCandidateMatches,
-    rejectJobApplication
+    rejectJobApplication,
+    createCandidateEducation,
+    updateCandidateEducation,
+    deleteCandidateEducation,   
+    createCandidateExperience,
+    updateCandidateExperience,
+    deleteCandidateExperience
 };
 

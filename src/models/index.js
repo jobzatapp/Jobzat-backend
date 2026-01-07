@@ -7,6 +7,8 @@ const Job = require('./Job');
 const JobProfile = require('./JobProfile');
 const Match = require('./Match');
 const JobApplication = require('./jobApplication');
+const CandidateEducation = require('./CandidateEducation');
+const CandidateExperience = require('./CandidateExperience');
 
 // Define associations
 User.hasOne(Candidate, { foreignKey: 'user_id', as: 'candidate' });
@@ -36,11 +38,19 @@ JobApplication.belongsTo(Candidate, { foreignKey: 'candidate_id', as: 'candidate
 Job.hasMany(JobApplication, { foreignKey: 'job_id', as: 'jobApplications' });
 JobApplication.belongsTo(Job, { foreignKey: 'job_id', as: 'job' });
 
+Candidate.hasMany(CandidateEducation, { foreignKey: 'candidate_id', as: 'educations' });
+CandidateEducation.belongsTo(Candidate, { foreignKey: 'candidate_id', as: 'candidate' });
+
+Candidate.hasMany(CandidateExperience, { foreignKey: 'candidate_id', as: 'experiences' });
+CandidateExperience.belongsTo(Candidate, { foreignKey: 'candidate_id', as: 'candidate' });
+
 module.exports = {
     sequelize,
     User,
     Candidate,
     CandidateProfile,
+    CandidateEducation,
+    CandidateExperience,
     Employer,
     Job,
     JobProfile,

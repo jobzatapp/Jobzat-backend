@@ -31,7 +31,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Health check
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', message: 'Dawami API is running' });
+    res.json({ status: 'ok', message: 'Jobzat API is running' });
 });
 
 // Error handling middleware

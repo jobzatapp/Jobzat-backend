@@ -9,18 +9,32 @@ const {
 const JobApplication = require("../models/jobApplication");
 const aiService = require("../services/aiService");
 const fileUploadService = require("../services/fileUploadService");
-const localFileUploadService = require("../services/localFileUploadService");
-const matchingService = require("../services/matchingService");
 const pdf = require("pdf-parse");
 const CandidateEducation = require("../models/CandidateEducation");
 const CandidateExperience = require("../models/CandidateExperience");
+
+const parseArrayField = (val) => {
+  if (val === undefined || val === null) return undefined;
+  if (Array.isArray(val))
+    return val
+      .map(String)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  if (typeof val === "string")
+    return val
+      .split(/[,;\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  return [String(val).trim()].filter(Boolean);
+};
 
 /**
  * Get candidate profile
  */
 const getProfile = async (req, res) => {
+  const candidateId = req.user.id;
   try {
-    const user = await User.findByPk(req.user.id, {
+    const user = await User.findByPk(candidateId, {
       include: [
         {
           model: Candidate,
@@ -37,9 +51,23 @@ const getProfile = async (req, res) => {
     if (!user.candidate) {
       return res.status(404).json({ error: "Candidate profile not found" });
     }
-    console.log("user", user);
+
+    const candidate = user.candidate;
+
+    const cvUrl = candidate.cv_url
+      ? await fileUploadService.getSignedFileUrl(candidate.cv_url, 300)
+      : null;
+
+    const videoUrl = candidate.video_url
+      ? await fileUploadService.getSignedFileUrl(candidate.video_url, 300)
+      : null;
+
     res.json({
-      candidate: user.candidate,
+      candidate: {
+        ...candidate.toJSON(),
+        cv_url: cvUrl,
+        video_url: videoUrl,
+      },
       profile_completed: user?.profile_completed,
     });
   } catch (error) {
@@ -48,67 +76,28 @@ const getProfile = async (req, res) => {
   }
 };
 
-/**
- * Update candidate profile
- */
-// const updateProfile = async (req, res) => {
-//     try {
-//         const user = await User.findByPk(req.user.id, {
-//             include: [{ model: Candidate, as: 'candidate' }]
-//         });
-
-//         if (!user.candidate) {
-//             return res.status(404).json({ error: 'Candidate profile not found' });
-//         }
-
-//         const { name, city, experience_years, category, salary_expectation } = req.body;
-
-//         await user.candidate.update({
-//             name: name || user.candidate.name,
-//             city: city !== undefined ? city : user.candidate.city,
-//             experience_years: experience_years !== undefined ? experience_years : user.candidate.experience_years,
-//             category: category || user.candidate.category,
-//             salary_expectation: salary_expectation !== undefined ? salary_expectation : user.candidate.salary_expectation
-//         });
-
-//         res.json({ message: 'Profile updated successfully', candidate: user.candidate });
-//     } catch (error) {
-//         console.error('Update profile error:', error);
-//         res.status(500).json({ error: 'Failed to update profile' });
-//     }
-// };
 const updateProfile = async (req, res) => {
-  console.log("req.files", req.files);
-
   try {
-    // Extract files from arrays (multer creates arrays for each field)
+    const userId = req.user.id;
+
+    const {
+      name,
+      city,
+      experience_years,
+      category,
+      salary_expectation,
+      skills,
+      languages,
+      summary,
+      country_code,
+      mobile_number,
+    } = req.body;
+
     const profile_image = req.files?.profile_image?.[0];
     const cv = req.files?.cv?.[0];
     const video = req.files?.video?.[0];
 
-    console.log("profile_image", profile_image);
-    console.log("cv", cv);
-    console.log("video", video);
-
-    // Upload files to local storage
-    const profile_image_url = profile_image
-      ? await localFileUploadService.uploadToLocal(
-          profile_image,
-          "profile_images"
-        )
-      : null;
-    const cv_url = cv
-      ? await localFileUploadService.uploadToLocal(cv, "cvs")
-      : null;
-    const video_url = video
-      ? await localFileUploadService.uploadToLocal(video, "videos")
-      : null;
-
-    console.log("profile_image_url", profile_image_url);
-    console.log("cv_url", cv_url);
-    console.log("video_url", video_url);
-
-    const user = await User.findByPk(req.user.id, {
+    const user = await User.findByPk(userId, {
       include: [
         {
           model: Candidate,
@@ -123,37 +112,36 @@ const updateProfile = async (req, res) => {
     }
 
     const candidate = user.candidate;
-    const {
-      name,
-      city,
-      experience_years,
-      category,
-      salary_expectation,
-      skills,
-      languages,
-      summary,
-      country_code,
-      mobile_number,
-    } = req.body;
 
-    const parseArrayField = (val) => {
-      if (val === undefined || val === null) return undefined;
-      if (Array.isArray(val))
-        return val.map((s) => String(s).trim()).filter(Boolean);
-      if (typeof val === "string") {
-        return val
-          .split(/[,;\n]+/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-      }
-      return [String(val).trim()].filter(Boolean);
-    };
+    /* --------------------------------------------------
+       UPLOAD FILES TO S3 (PRIVATE)
+    -------------------------------------------------- */
+
+    const profileImageKey = profile_image
+      ? await fileUploadService.uploadToS3(
+          profile_image,
+          "profile-images",
+          userId
+        )
+      : null;
+
+    const cvKey = cv
+      ? await fileUploadService.uploadToS3(cv, "cvs", userId)
+      : null;
+
+    const videoKey = video
+      ? await fileUploadService.uploadToS3(video, "videos", userId)
+      : null;
+
+    /* --------------------------------------------------
+       BUILD CANDIDATE PAYLOAD
+    -------------------------------------------------- */
 
     const skillsArr = parseArrayField(skills);
     const languagesArr = parseArrayField(languages);
 
-    // Build candidate payload
     const candidatePayload = {};
+
     if (name !== undefined) candidatePayload.name = name;
     if (city !== undefined) candidatePayload.city = city;
     if (experience_years !== undefined)
@@ -162,52 +150,56 @@ const updateProfile = async (req, res) => {
     if (salary_expectation !== undefined)
       candidatePayload.salary_expectation = salary_expectation;
 
-    // Add file URLs to candidate payload
-    if (profile_image_url) {
-      // Delete old profile image if exists
-      if (candidate.profile_image_url) {
-        await fileUploadService.deleteFile(candidate.profile_image_url);
+    /* --------------------------------------------------
+       HANDLE FILE REPLACEMENT (DELETE OLD S3 OBJECTS)
+    -------------------------------------------------- */
+
+    if (profileImageKey) {
+      if (candidate.profile_image_key) {
+        await fileUploadService.deleteFile(candidate.profile_image_key);
       }
-      candidatePayload.profile_image_url = profile_image_url;
-    }
-    if (cv_url) {
-      // Delete old CV if exists
-      if (candidate.cv_url) {
-        await fileUploadService.deleteFile(candidate.cv_url);
-      }
-      candidatePayload.cv_url = cv_url;
-    }
-    if (video_url) {
-      // Delete old video if exists
-      if (candidate.video_url) {
-        await fileUploadService.deleteFile(candidate.video_url);
-      }
-      candidatePayload.video_url = video_url;
+      candidatePayload.profile_image_url = profileImageKey;
     }
 
-    // Update candidate if there are changes
+    if (cvKey) {
+      if (candidate.cv_key) {
+        await fileUploadService.deleteFile(candidate.cv_key);
+      }
+      candidatePayload.cv_url = cvKey;
+    }
+
+    if (videoKey) {
+      if (candidate.video_key) {
+        await fileUploadService.deleteFile(candidate.video_key);
+      }
+      candidatePayload.video_url = videoKey;
+    }
+
     if (Object.keys(candidatePayload).length > 0) {
+      console.log("Checking here in condition ");
       candidatePayload.updated_at = new Date();
       await candidate.update(candidatePayload);
     }
 
-    // Handle profile
+    /* --------------------------------------------------
+       PROFILE TABLE
+    -------------------------------------------------- */
+
     let profile = await CandidateProfile.findOne({
       where: { candidate_id: candidate.id },
     });
 
     if (!profile) {
-      const createPayload = {
+      profile = await CandidateProfile.create({
         candidate_id: candidate.id,
-        skills: skillsArr !== undefined ? skillsArr : [],
-        languages: languagesArr !== undefined ? languagesArr : [],
-        summary: summary !== undefined ? summary : null,
-        mobile_number: mobile_number !== undefined ? mobile_number : null,
-        country_code: country_code !== undefined ? country_code : null,
+        skills: skillsArr ?? [],
+        languages: languagesArr ?? [],
+        summary: summary ?? null,
+        mobile_number: mobile_number ?? null,
+        country_code: country_code ?? null,
         created_at: new Date(),
         updated_at: new Date(),
-      };
-      profile = await CandidateProfile.create(createPayload);
+      });
     } else {
       const profilePayload = {};
       if (skillsArr !== undefined) profilePayload.skills = skillsArr;
@@ -224,6 +216,10 @@ const updateProfile = async (req, res) => {
       }
     }
 
+    /* --------------------------------------------------
+       USER TABLE
+    -------------------------------------------------- */
+
     const userPayload = {};
     if (country_code !== undefined) userPayload.country_code = country_code;
     if (mobile_number !== undefined) userPayload.mobile_number = mobile_number;
@@ -233,17 +229,18 @@ const updateProfile = async (req, res) => {
       await user.update(userPayload);
     }
 
-    // Reload candidate with updated data
+    /* --------------------------------------------------
+       PROFILE COMPLETION CHECK
+    -------------------------------------------------- */
+
     await candidate.reload();
 
-    // Check if profile is completed
     const isProfileCompleted =
       Boolean(candidate.name) &&
       Boolean(candidate.city) &&
       Number.isInteger(candidate.experience_years) &&
       Boolean(candidate.category);
 
-    // Update user profile_completed flag if changed
     if (user.profile_completed !== isProfileCompleted) {
       await user.update({
         profile_completed: isProfileCompleted,
@@ -251,7 +248,10 @@ const updateProfile = async (req, res) => {
       });
     }
 
-    // Get updated candidate with profile
+    /* --------------------------------------------------
+       RESPONSE WITH SIGNED URLS
+    -------------------------------------------------- */
+
     const updatedCandidate = await Candidate.findByPk(candidate.id, {
       include: [{ model: CandidateProfile, as: "profile" }],
     });
@@ -261,11 +261,15 @@ const updateProfile = async (req, res) => {
       profile_completed: isProfileCompleted,
       candidate: {
         ...updatedCandidate.toJSON(),
-        profile_image_url: fileUploadService.getFileUrl(
+        profile_image_url: await fileUploadService.getSignedFileUrl(
           updatedCandidate.profile_image_url
         ),
-        cv_url: fileUploadService.getFileUrl(updatedCandidate.cv_url),
-        video_url: fileUploadService.getFileUrl(updatedCandidate.video_url),
+        cv_url: await fileUploadService.getSignedFileUrl(
+          updatedCandidate.cv_url
+        ),
+        video_url: await fileUploadService.getSignedFileUrl(
+          updatedCandidate.video_url
+        ),
         country_code: user.country_code,
         mobile_number: user.mobile_number,
       },
@@ -280,117 +284,7 @@ const updateProfile = async (req, res) => {
   }
 };
 
-/**
- * Upload CV and parse it
- */
-const uploadCV = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "CV file is required" });
-    }
-
-    const user = await User.findByPk(req.user.id, {
-      include: [{ model: Candidate, as: "candidate" }],
-    });
-
-    if (!user.candidate) {
-      return res.status(404).json({ error: "Candidate profile not found" });
-    }
-
-    // Delete old CV from S3 if exists
-    if (user.candidate.cv_url) {
-      await fileUploadService.deleteFile(user.candidate.cv_url);
-    }
-
-    // Upload CV to S3
-    const s3Url = await fileUploadService.uploadToS3(req.file, "cv");
-    await user.candidate.update({ cv_url: s3Url });
-
-    // Parse CV using AI
-    try {
-      const pdfData = await pdf(req.file.buffer);
-      const cvText = pdfData.text;
-
-      const parsedData = await aiService.parseCV(cvText);
-
-      // Create or update candidate profile
-      let profile = await CandidateProfile.findOne({
-        where: { candidate_id: user.candidate.id },
-      });
-
-      if (profile) {
-        await profile.update({
-          skills: parsedData.skills || [],
-          languages: parsedData.languages || [],
-          summary: parsedData.summary || "",
-        });
-      } else {
-        profile = await CandidateProfile.create({
-          candidate_id: user.candidate.id,
-          skills: parsedData.skills || [],
-          languages: parsedData.languages || [],
-          summary: parsedData.summary || "",
-        });
-      }
-
-      // Trigger matching with all jobs
-      // await matchingService.matchCandidateToJobs(user.candidate.id);
-
-      res.json({
-        message: "CV uploaded and parsed successfully",
-        candidate: user.candidate,
-        profile: profile,
-      });
-    } catch (parseError) {
-      console.error("CV parsing error:", parseError);
-      // Still return success, but note that parsing failed
-      res.json({
-        message: "CV uploaded successfully, but parsing failed",
-        candidate: user.candidate,
-        warning: "CV parsing failed. Please try again later.",
-      });
-    }
-  } catch (error) {
-    console.error("Upload CV error:", error);
-    res.status(500).json({ error: "Failed to upload CV" });
-  }
-};
-
-/**
- * Upload video intro
- */
-const uploadVideo = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "Video file is required" });
-    }
-
-    const user = await User.findByPk(req.user.id, {
-      include: [{ model: Candidate, as: "candidate" }],
-    });
-
-    if (!user.candidate) {
-      return res.status(404).json({ error: "Candidate profile not found" });
-    }
-
-    // Delete old video from S3 if exists
-    if (user.candidate.video_url) {
-      await fileUploadService.deleteFile(user.candidate.video_url);
-    }
-
-    // Upload video to S3
-    const s3Url = await fileUploadService.uploadToS3(req.file, "videos");
-    await user.candidate.update({ video_url: s3Url });
-
-    res.json({
-      message: "Video uploaded successfully",
-      candidate: user.candidate,
-    });
-  } catch (error) {
-    console.error("Upload video error:", error);
-    res.status(500).json({ error: "Failed to upload video" });
-  }
-};
+module.exports = { updateProfile };
 
 const getCandidateMatches = async (req, res) => {
   try {
@@ -635,8 +529,6 @@ const deleteCandidateExperience = async (req, res) => {
 module.exports = {
   getProfile,
   updateProfile,
-  uploadCV,
-  uploadVideo,
   getCandidateMatches,
   rejectJobApplication,
   createCandidateEducation,

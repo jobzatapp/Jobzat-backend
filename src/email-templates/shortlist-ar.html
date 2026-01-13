@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <title>تم ترشيحك للوظيفة</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  </head>
+
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      background-color: #f4f6f8;
+      font-family: Arial, Helvetica, sans-serif;
+    "
+  >
+    <table
+      width="100%"
+      cellpadding="0"
+      cellspacing="0"
+      style="background-color: #f4f6f8; padding: 30px 0"
+    >
+      <tr>
+        <td align="center">
+          <table
+            width="600"
+            cellpadding="0"
+            cellspacing="0"
+            style="
+              background-color: #ffffff;
+              border-radius: 8px;
+              overflow: hidden;
+            "
+          >
+            <!-- LOGO -->
+            <tr>
+              <td align="center" style="padding: 30px 20px 10px">
+                <img
+                  src="https://jobzat-bkt.s3.ap-south-1.amazonaws.com/logo.png"
+                  alt="Jobzat Logo"
+                  style="max-width: 160px; height: auto"
+                />
+              </td>
+            </tr>
+
+            <!-- TITLE -->
+            <tr>
+              <td align="center" style="padding: 20px">
+                <h2
+                  style="
+                    margin: 0;
+                    color: #222;
+                    font-size: 22px;
+                    font-weight: bold;
+                  "
+                >
+                  🎉 تم ترشيحك للوظيفة
+                </h2>
+              </td>
+            </tr>
+
+            <!-- CONTENT -->
+            <tr>
+              <td
+                style="
+                  padding: 0 40px 20px;
+                  color: #555;
+                  font-size: 15px;
+                  line-height: 1.8;
+                  text-align: right;
+                "
+              >
+                <p style="margin: 0 0 15px">
+                  مرحباً <strong><%= candidateName %></strong>،
+                </p>
+
+                <p style="margin: 0 0 15px">
+                  خبر رائع! تم ترشيحك للوظيفة التالية:
+                </p>
+
+                <p style="margin: 0 0 15px; font-size: 16px; color: #111">
+                  <strong><%= jobTitle %></strong><br />
+                  <span style="color: #555">
+                    في <strong><%= companyName %></strong>
+                  </span>
+                </p>
+
+                <p style="margin: 0">
+                  قام صاحب العمل بمراجعة ملفك وسيتم التواصل معك مباشرة بخصوص
+                  الخطوات القادمة.
+                </p>
+              </td>
+            </tr>
+
+            <!-- FOOTER TEXT -->
+            <tr>
+              <td
+                style="
+                  padding: 0 40px 20px;
+                  color: #777;
+                  font-size: 14px;
+                  line-height: 1.6;
+                  text-align: right;
+                "
+              >
+                <p style="margin: 0">نتمنى لك كل التوفيق!</p>
+              </td>
+            </tr>
+
+            <!-- FOOTER -->
+            <tr>
+              <td
+                align="center"
+                style="
+                  background-color: #f9fafb;
+                  padding: 20px;
+                  font-size: 12px;
+                  color: #999;
+                "
+              >
+                <strong>دوامي</strong><br />
+                <em>هنا الفرص تلقاك</em>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

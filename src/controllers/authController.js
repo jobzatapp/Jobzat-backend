@@ -1,87 +1,19 @@
-const { User, Candidate, Employer, CandidateProfile, CandidateEducation, CandidateExperience } = require("../models");
+const crypto = require("crypto");
+const path = require("path");
+const ejs = require("ejs");
+const { sendMail } = require("../services/emailService");
+const {
+  User,
+  Candidate,
+  Employer,
+  CandidateProfile,
+  CandidateEducation,
+  CandidateExperience,
+} = require("../models");
 const { hashPassword, comparePassword } = require("../utils/password");
 const { generateToken } = require("../utils/jwt");
-const { sendVerificationEmail } = require("../services/emailService");
-const crypto = require("crypto");
+const fileUploadService = require("../services/fileUploadService");
 
-/**
- * Register a new user (candidate or employer)
- */
-// const register = async (req, res) => {
-//     try {
-//         const { email, password, role, name, city, company_name } = req.body;
-
-//         // Validate required fields
-//         if (!email || !password || !role) {
-//             return res.status(400).json({ error: 'Email, password, and role are required' });
-//         }
-
-//         if (!['candidate', 'employer'].includes(role)) {
-//             return res.status(400).json({ error: 'Role must be either candidate or employer' });
-//         }
-
-//         // Check if user already exists
-//         const existingUser = await User.findOne({ where: { email } });
-//         if (existingUser) {
-//             return res.status(400).json({ error: 'User with this email already exists' });
-//         }
-
-//         // Hash password
-//         const password_hash = await hashPassword(password);
-
-//         // Create user
-//         const user = await User.create({
-//             email,
-//             password_hash,
-//             role
-//         });
-
-//         // Create role-specific profile
-//         let userName = null;
-//         if (role === 'candidate') {
-//             if (!name) {
-//                 return res.status(400).json({ error: 'Name is required for candidates' });
-//             }
-//             await Candidate.create({
-//                 user_id: user.id,
-//                 name,
-//                 city: city || null
-//             });
-//             userName = name;
-//         } else if (role === 'employer') {
-//             if (!company_name) {
-//                 return res.status(400).json({ error: 'Company name is required for employers' });
-//             }
-//             await Employer.create({
-//                 user_id: user.id,
-//                 company_name,
-//                 city: city || null
-//             });
-//             userName = company_name;
-//         }
-
-//         // Generate token with user data
-//         const token = generateToken({
-//             id: user.id,
-//             email: user.email,
-//             role: user.role,
-//             name: userName
-//         });
-
-//         res.status(201).json({
-//             message: 'User registered successfully',
-//             token,
-//             user: {
-//                 id: user.id,
-//                 email: user.email,
-//                 role: user.role
-//             }
-//         });
-//     } catch (error) {
-//         console.error('Registration error:', error);
-//         res.status(500).json({ error: 'Failed to register user' });
-//     }
-// };
 const register = async (req, res) => {
   try {
     const { email, password, country_code, mobile_number } = req.body;
@@ -107,8 +39,32 @@ const register = async (req, res) => {
       mobile_number: mobile_number || "",
     });
 
-    // Token payload contains onboarding flags so FE can route correctly
-    const token = generateToken({
+    const verificationToken = crypto.randomBytes(32).toString("hex");
+
+    // Store token in DB
+    user.verification_token = verificationToken;
+    await user.save();
+
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+
+    const templatePath = path.join(
+      __dirname,
+      "../email-templates/verify-email.html"
+    );
+
+    const html = await ejs.renderFile(templatePath, {
+      email: user.email,
+      verificationUrl,
+    });
+
+    // Send email
+    await sendMail({
+      to: user.email,
+      subject: "Verify your account",
+      html,
+    });
+
+    const authToken = generateToken({
       userId: user.id,
       email: user.email,
       role: user.role, // null initially
@@ -118,14 +74,13 @@ const register = async (req, res) => {
 
     return res.status(201).json({
       message: "Registered successfully",
-      token,
+      token: authToken,
       user: {
         id: user.id,
         email: user.email,
         role: user.role,
         role_added: user.role_added,
         profile_completed: user.profile_completed,
-        is_verified: user.is_verified,
         mobile_number: user.mobile_number,
         country_code: user.country_code,
       },
@@ -142,8 +97,6 @@ const register = async (req, res) => {
 const PLACEHOLDER_NAME = "";
 
 const assignRole = async (req, res) => {
-  console.log("Inside the role assignment");
-
   try {
     const { role } = req.body;
     const user = req.user;
@@ -234,7 +187,6 @@ const login = async (req, res) => {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // Find user
     const user = await User.findOne({
       where: { email },
       include: [
@@ -287,29 +239,63 @@ const login = async (req, res) => {
  */
 const getMe = async (req, res) => {
   try {
-    const user = await User.findByPk(req.user.id, {
-      include: [
-        {
-          model: Candidate,
-          as: "candidate",
-          include: [
-            { model: CandidateProfile, as: "profile" },
-            { model: CandidateEducation, as: "educations" },
-            { model: CandidateExperience, as: "experiences" },
-          ],
-        },
-        { model: Employer, as: "employer" },
-      ],
-    });
+    const { id: userId, role } = req.user;
 
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
+    if (role === "candidate") {
+      const user = await User.findByPk(userId, {
+        attributes: ["id", "email", "role", "role_added", "profile_completed"],
+        include: [
+          {
+            model: Candidate,
+            as: "candidate",
+            include: [
+              { model: CandidateProfile, as: "profile" },
+              { model: CandidateEducation, as: "educations" },
+              { model: CandidateExperience, as: "experiences" },
+            ],
+          },
+        ],
+      });
+
+      if (!user || !user.candidate) {
+        return res.status(404).json({ error: "Candidate profile not found" });
+      }
+
+      return res.json({
+        ...user.toJSON(),
+        candidate: {
+          ...user.candidate.toJSON(),
+          // ✅ ONLY profile image URL for UI
+          profile_image_url: user.candidate.profile_image_url
+            ? await fileUploadService.getSignedFileUrl(
+                user.candidate.profile_image_url,
+                120
+              )
+            : null,
+        },
+      });
     }
 
-    res.json({ user });
+    if (role === "employer") {
+      const user = await User.findByPk(userId, {
+        attributes: ["id", "email", "role" , "role_added"],
+        include: [{ model: Employer, as: "employer" }],
+      });
+
+      if (!user || !user.employer) {
+        return res.status(404).json({ error: "Employer profile not found" });
+      }
+
+      return res.json({
+        ...user.toJSON(),
+        employer: user.employer,
+      });
+    }
+
+    return res.status(400).json({ error: "Invalid user role" });
   } catch (error) {
     console.error("Get me error:", error);
-    res.status(500).json({ error: "Failed to get user profile" });
+    return res.status(500).json({ error: "Failed to get user profile" });
   }
 };
 
@@ -355,7 +341,23 @@ const requestVerification = async (req, res) => {
     user.verification_token = token;
     await user.save();
 
-    await sendVerificationEmail(user.email, token);
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+
+    const templatePath = path.join(
+      __dirname,
+      "../email-templates/verify-email.html"
+    );
+
+    const html = await ejs.renderFile(templatePath, {
+      email: user.email,
+      verificationUrl,
+    });
+
+    await sendMail({
+      to: user.email,
+      subject: "Verify your account",
+      html,
+    });
 
     res.json({ message: "Verification email sent" });
   } catch (error) {
@@ -394,20 +396,26 @@ const verifyEmail = async (req, res) => {
 const deleteAccount = async (req, res) => {
   try {
     const user = req.user;
-    console.log("🚀 ~ deleteAccount ~ user:", user)
+    console.log("🚀 ~ deleteAccount ~ user:", user);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
     await Candidate.destroy({ where: { user_id: user.dataValues.id } });
     await Employer.destroy({ where: { user_id: user.dataValues.id } });
-    await CandidateProfile.destroy({ where: { candidate_id: user.dataValues.id } });
-    await CandidateEducation.destroy({ where: { candidate_id: user.dataValues.id } });
-    await CandidateExperience.destroy({ where: { candidate_id: user.dataValues.id } });
+    await CandidateProfile.destroy({
+      where: { candidate_id: user.dataValues.id },
+    });
+    await CandidateEducation.destroy({
+      where: { candidate_id: user.dataValues.id },
+    });
+    await CandidateExperience.destroy({
+      where: { candidate_id: user.dataValues.id },
+    });
     await User.destroy({ where: { id: user.dataValues.id } });
-    res.json({ message: 'Account deleted successfully' });
+    res.json({ message: "Account deleted successfully" });
   } catch (error) {
-    console.error('Delete account error:', error);
-    res.status(500).json({ error: 'Failed to delete account' });
+    console.error("Delete account error:", error);
+    res.status(500).json({ error: "Failed to delete account" });
   }
 };
 
@@ -419,5 +427,5 @@ module.exports = {
   updatePassword,
   requestVerification,
   verifyEmail,
-  deleteAccount
+  deleteAccount,
 };

@@ -1,8 +1,8 @@
 {
   "development": {
     "username": "postgres",
-    "password": "root",
-    "database": "dawami_dev",
+    "password": "postgres",
+    "database": "jobzat",
     "host": "127.0.0.1",
     "port": 5432,
     "dialect": "postgres"

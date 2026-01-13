@@ -1,4 +1,6 @@
-const emailService = require('../services/emailService');
+const path = require("path");
+const ejs = require("ejs");
+const { sendMail } = require("../services/emailService");
 const { Match, Job, Candidate, CandidateProfile, JobProfile, User, Employer, JobApplication } = require('../models/index');
 const fileUploadService = require('../services/fileUploadService');
 
@@ -164,32 +166,54 @@ const shortlistMatch = async (req, res) => {
         // Send notification email to candidate
         let emailSent = false;
         try {
-            if (!match.candidate?.user) {
+
+            const candidateUser = match.candidate?.user;
+
+            if (candidateUser) {
                 throw new Error('Candidate user information not found');
-            }
+            } F
 
-            const candidateUser = match.candidate.user;
-            const userLanguage = candidateUser.language || 'en';
+            const language = candidateUser.language === "ar" ? "ar" : "en";
 
-            await emailService.sendShortlistNotification(
-                candidateUser.email,
-                match.candidate.name,
-                match.job.title,
-                match.job.employer.company_name,
-                userLanguage
+            const templateName =
+                language === "ar" ? "shortlist-ar.html" : "shortlist-en.html";
+
+            const templatePath = path.join(
+                __dirname,
+                "../email-templates",
+                templateName
             );
 
+            // 🔹 Render HTML using EJS
+            const html = await ejs.renderFile(templatePath, {
+                candidateName: match.candidate.name,
+                jobTitle: match.job.title,
+                companyName: match.job.employer.company_name
+            });
+
+            const subject =
+                language === "ar"
+                    ? `تم ترشيحك لوظيفة ${match.job.title}`
+                    : `You've been shortlisted for ${match.job.title}`;
+
+            // 🔹 Send mail (nodemailer only)
+            await sendMail({
+                to: candidateUser.email,
+                subject,
+                html
+            });
+
             emailSent = true;
-            console.log(`Shortlist email sent to ${candidateUser.email} in ${userLanguage}`);
+            console.log(`Shortlist email sent to ${candidateUser.email}`);
+
         } catch (emailError) {
             console.error('Error sending shortlist notification email:', emailError);
-            // Log but don't fail the request if email fails
         }
 
         res.json({
             message: emailSent
-                ? 'Candidate shortlisted successfully. Notification email sent.'
-                : 'Candidate shortlisted successfully. Email notification failed.',
+                ? "Candidate shortlisted successfully. Notification email sent."
+                : "Candidate shortlisted successfully. Email notification failed.",
             emailSent,
             match: {
                 id: match.id,
@@ -210,10 +234,8 @@ const shortlistMatch = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Shortlist match error:', error);
         res.status(500).json({
             error: 'Failed to shortlist candidate',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };

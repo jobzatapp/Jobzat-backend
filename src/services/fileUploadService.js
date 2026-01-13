@@ -1,152 +1,155 @@
-const multer = require('multer');
-const path = require('path');
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
-const { Upload } = require('@aws-sdk/lib-storage');
-const { v4: uuidv4 } = require('uuid');
+const multer = require("multer");
+const path = require("path");
+const { v4: uuidv4 } = require("uuid");
 
-// Configure AWS S3 Client (v3)
+const {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+} = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
+/* ======================================================
+   S3 CLIENT (IAM ROLE – NO CREDENTIALS HERE)
+====================================================== */
+
 const s3Client = new S3Client({
-    region: process.env.AWS_REGION || 'us-east-1',
-    credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-    }
+  region: process.env.AWS_REGION,
 });
 
-const S3_BUCKET = process.env.AWS_S3_BUCKET;
+const BUCKET = process.env.AWS_S3_BUCKET;
 
-// Configure multer memory storage (we'll upload directly to S3)
-const storage = multer.memoryStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/' + file.fieldname);
-    }
-});
+/* ======================================================
+   FILE FILTER (VALIDATION)
+====================================================== */
 
-// File filter
 const fileFilter = (req, file, cb) => {
-    if (file.fieldname === 'cv') {
-        // Only allow PDF files for CVs
-        if (file.mimetype === 'application/pdf') {
-            cb(null, true);
-        } else {
-            cb(new Error('Only PDF files are allowed for CVs'), false);
-        }
-    } else if (file.fieldname === 'video') {
-        // Allow common video formats
-        const allowedMimes = ['video/mp4', 'video/webm', 'video/quicktime'];
-        if (allowedMimes.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only MP4, WebM, or QuickTime videos are allowed'), false);
-        }
-    } else if (file.fieldname === 'profile_image') {
-        // Allow common image formats
-        const allowedMimes = ['image/jpeg', 'image/png', 'image/jpg'];
-        if (allowedMimes.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only JPEG, PNG, or JPG images are allowed'), false);
-        }
-    } else {
-        cb(null, true);
-    }
+  if (file.fieldname === "cv") {
+    return file.mimetype === "application/pdf"
+      ? cb(null, true)
+      : cb(new Error("Only PDF files are allowed for CV"), false);
+  }
+
+  if (file.fieldname === "video") {
+    const allowed = ["video/mp4", "video/webm", "video/quicktime"];
+    return allowed.includes(file.mimetype)
+      ? cb(null, true)
+      : cb(new Error("Invalid video format"), false);
+  }
+
+  if (file.fieldname === "profile_image") {
+    const allowed = ["image/jpeg", "image/png", "image/jpg"];
+    return allowed.includes(file.mimetype)
+      ? cb(null, true)
+      : cb(new Error("Invalid image format"), false);
+  }
+
+  cb(null, true);
 };
 
-// Configure multer
+/* ======================================================
+   MULTER (MEMORY ONLY)
+====================================================== */
+
 const upload = multer({
-    storage: storage,
-    fileFilter: fileFilter,
-    limits: {
-        fileSize: 30 * 1024 * 1024 // 30MB limit
-    }
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 30 * 1024 * 1024, // 30MB
+  },
+  fileFilter,
 });
 
-/**
- * Upload file to S3
- */
-const uploadToS3 = async (file, folder = '') => {
-    try {
-        const fileExtension = path.extname(file.originalname);
-        const fileName = `${folder}${folder ? '/' : ''}${uuidv4()}${fileExtension}`;
-        const contentType = file.mimetype;
+/* ======================================================
+   MULTER ERROR HANDLER (EXPORT THIS)
+====================================================== */
 
-        // Use Upload from @aws-sdk/lib-storage for better handling of large files
-        const upload = new Upload({
-            client: s3Client,
-            params: {
-                Bucket: S3_BUCKET,
-                Key: fileName,
-                Body: file.buffer,
-                ContentType: contentType,
-                ACL: 'public-read' // Make files publicly accessible, or use 'private' with signed URLs
-            }
-        });
+const multerErrorHandler = (err, req, res, next) => {
+  // Multer file size error
+  if (err?.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({
+      error: "File size exceeds allowed limit (30MB)",
+    });
+  }
 
-        const result = await upload.done();
+  // Custom file filter errors
+  if (err?.message) {
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
 
-        // Construct the URL from the result
-        const region = process.env.AWS_REGION || 'us-east-1';
-        const url = `https://${S3_BUCKET}.s3.${region}.amazonaws.com/${fileName}`;
-        return url;
-    } catch (error) {
-        console.error('Error uploading to S3:', error);
-        throw new Error('Failed to upload file to S3');
-    }
+  next(err);
 };
 
-/**
- * Get file URL from S3 key or full URL
- */
-const getFileUrl = (s3KeyOrUrl) => {
-    if (!s3KeyOrUrl) return null;
+/* ======================================================
+   UPLOAD TO S3 (PRIVATE OBJECT)
+====================================================== */
 
-    // If already a full URL, return as is
-    if (s3KeyOrUrl.startsWith('http://') || s3KeyOrUrl.startsWith('https://')) {
-        return s3KeyOrUrl;
-    }
+const uploadToS3 = async (file, folder, userId) => {
+  if (!file) return null;
 
-    // If it's an S3 key, construct the URL
-    // Format: https://{bucket}.s3.{region}.amazonaws.com/{key}
-    const region = process.env.AWS_REGION || 'us-east-1';
-    return `https://${S3_BUCKET}.s3.${region}.amazonaws.com/${s3KeyOrUrl}`;
+  const key = `${folder}/${userId}/${uuidv4()}${path.extname(
+    file.originalname
+  )}`;
+
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+      // ❌ NO ACL → private by default
+    })
+  );
+
+  return key; // ✅ STORE THIS IN DB
 };
 
-/**
- * Delete file from S3
- */
-const deleteFile = async (s3KeyOrUrl) => {
-    try {
-        if (!s3KeyOrUrl) return;
+/* ======================================================
+   GET SIGNED URL (READ ACCESS)
+====================================================== */
 
-        // Extract S3 key from URL if it's a full URL
-        let s3Key = s3KeyOrUrl;
-        if (s3KeyOrUrl.startsWith('http://') || s3KeyOrUrl.startsWith('https://')) {
-            // Extract key from URL: https://bucket.s3.region.amazonaws.com/key
-            const urlParts = s3KeyOrUrl.split('.amazonaws.com/');
-            if (urlParts.length > 1) {
-                s3Key = urlParts[1];
-            } else {
-                console.warn('Could not extract S3 key from URL:', s3KeyOrUrl);
-                return;
-            }
-        }
+const getSignedFileUrl = async (key, expiresIn = 300) => {
+  if (!key) return null;
 
-        const command = new DeleteObjectCommand({
-            Bucket: S3_BUCKET,
-            Key: s3Key
-        });
-
-        await s3Client.send(command);
-    } catch (error) {
-        console.error('Error deleting file from S3:', error);
-        // Don't throw - file deletion failure shouldn't break the flow
-    }
+  return getSignedUrl(
+    s3Client,
+    new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+    }),
+    { expiresIn }
+  );
 };
+
+/* ======================================================
+   DELETE FILE FROM S3
+====================================================== */
+
+const deleteFile = async (key) => {
+  if (!key) return;
+
+  try {
+    await s3Client.send(
+      new DeleteObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+      })
+    );
+  } catch (err) {
+    console.error("S3 delete failed:", err);
+  }
+};
+
+/* ======================================================
+   EXPORTS
+====================================================== */
 
 module.exports = {
-    upload,
-    uploadToS3,
-    getFileUrl,
-    deleteFile
+  upload,
+  uploadToS3,
+  getSignedFileUrl,
+  deleteFile,
+  multerErrorHandler,
 };
-
